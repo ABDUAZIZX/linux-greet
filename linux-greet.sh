@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# debian-welcome — a friendly Linux terminal banner.
+# linux-greet — a friendly Linux terminal banner.
 # Shows: distro name in ASCII · localised date · uptime · GPU temp (if available).
 # Tested on Debian 13 but works on any Linux with bash >= 4.0.
 #
 # License: MIT
-# Source : https://github.com/azoz8/debian-welcome   (replace after fork)
+# Source : https://github.com/azoz8/linux-greet   (replace after fork)
 
 set -uo pipefail
 

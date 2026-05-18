@@ -1,4 +1,4 @@
-# debian-welcome
+# linux-greet
 
 > A friendly bilingual (Arabic / English) terminal banner for Linux.
 > Shows distro name, localised date, uptime, GPU temperature, load, memory — every time you open a terminal.
@@ -37,28 +37,28 @@
 
 ```bash
 # 1. Clone or download
-git clone https://github.com/azoz8/debian-welcome.git
-cd debian-welcome
+git clone https://github.com/azoz8/linux-greet.git
+cd linux-greet
 
 # 2. Make executable
-chmod +x debian-welcome.sh
+chmod +x linux-greet.sh
 
 # 3. (Optional) Run once to test
-./debian-welcome.sh
+./linux-greet.sh
 
 # 4. Auto-run on every new terminal — add to ~/.bashrc OR ~/.zshrc
 cat >> ~/.zshrc <<'EOF'
 
-# debian-welcome banner — show once per interactive shell
+# linux-greet banner — show once per interactive shell
 if [[ $- == *i* ]] && [[ -z "${BANNER_SHOWN:-}" ]]; then
-    [ -f "$HOME/debian-welcome/debian-welcome.sh" ] && \
-        bash "$HOME/debian-welcome/debian-welcome.sh"
+    [ -f "$HOME/linux-greet/linux-greet.sh" ] && \
+        bash "$HOME/linux-greet/linux-greet.sh"
     export BANNER_SHOWN=1
 fi
 EOF
 ```
 
-> Adjust the path inside the hook to wherever you placed `debian-welcome.sh`.
+> Adjust the path inside the hook to wherever you placed `linux-greet.sh`.
 
 ## 🌍 Arabic locale (optional, recommended)
 
@@ -71,7 +71,7 @@ sudo dpkg-reconfigure locales      # pick: ar_SA.UTF-8
 
 ## 🛠 Customisation
 
-Open `debian-welcome.sh` and tweak:
+Open `linux-greet.sh` and tweak:
 
 - **Banner text** — replace the `DEBIAN 13` block letters with your distro
   (try [patorjk.com/software/taag](https://patorjk.com/software/taag/) with font `ANSI Shadow`)
@@ -96,7 +96,7 @@ PRs welcome for:
 
 ---
 
-# debian-welcome — العربية
+# linux-greet — العربية
 
 شعار ترحيب جذّاب لأي terminal على Linux. يعرض اسم النظام، تاريخ اليوم بالعربية، uptime، حرارة GPU، حمل الـ CPU، والذاكرة — كل مرة تفتح terminal.
 
@@ -112,7 +112,7 @@ PRs welcome for:
 ## التثبيت السريع
 
 ```bash
-git clone https://github.com/azoz8/debian-welcome.git ~/debian-welcome
-chmod +x ~/debian-welcome/debian-welcome.sh
+git clone https://github.com/azoz8/linux-greet.git ~/linux-greet
+chmod +x ~/linux-greet/linux-greet.sh
 # للتشغيل التلقائي، انسخ block التشغيل من قسم Installation أعلاه
 ```
