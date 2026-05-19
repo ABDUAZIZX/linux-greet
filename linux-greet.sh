@@ -30,6 +30,7 @@ SHOW_UPTIME=1
 SHOW_GPU=1
 SHOW_GPU_DETAIL=1     # 1=name + temp + VRAM bar + power | 0=temp only
 SHOW_OLLAMA=1
+SHOW_SECURITY=1       # security updates count + firewall + last login
 SHOW_LOAD=1
 SHOW_MEMORY=1
 LANG_MODE=both        # ar | en | both
@@ -38,7 +39,7 @@ GREETING_NAME=""      # if empty, falls back to $USER
 
 # Whitelist of config keys (space-separated).
 # Parsing never executes config content — values are matched against this list.
-readonly _ALLOWED_KEYS="SHOW_BANNER SHOW_WELCOME SHOW_DATE SHOW_UPTIME SHOW_GPU SHOW_GPU_DETAIL SHOW_OLLAMA SHOW_LOAD SHOW_MEMORY LANG_MODE BANNER_COLOR GREETING_NAME"
+readonly _ALLOWED_KEYS="SHOW_BANNER SHOW_WELCOME SHOW_DATE SHOW_UPTIME SHOW_GPU SHOW_GPU_DETAIL SHOW_OLLAMA SHOW_SECURITY SHOW_LOAD SHOW_MEMORY LANG_MODE BANNER_COLOR GREETING_NAME"
 
 # ════════════════════════════════════════════════════════════
 # Safe config loader — KEY=VALUE only, no `source`, whitelisted keys.
@@ -390,6 +391,142 @@ _section_memory() {
 }
 
 # ════════════════════════════════════════════════════════════
+# Section: Security panel — security updates · firewall · last login
+#
+# Design decisions (security review baked in):
+#   - NO sudo anywhere — `systemctl is-active` works for any user.
+#   - `apt list --upgradable` costs ~400 ms; we cache its result and refresh
+#     in a detached background subshell so the banner never blocks.
+#   - Cache lives under $XDG_CACHE_HOME (user-owned, mode 0700 by default).
+#   - Last login is display-only — no "smart alerts" that need persistent
+#     state which an attacker on the same account could poison.
+# ════════════════════════════════════════════════════════════
+readonly _SECURITY_CACHE_TTL=21600     # 6 hours
+readonly _SECURITY_CACHE_REL="linux-greet/security-updates"
+
+_security_cache_path() {
+    # Reject a non-absolute $XDG_CACHE_HOME — defends against a malicious
+    # env override (e.g. via misconfigured `sudo -E` or SSH AcceptEnv).
+    local base="${XDG_CACHE_HOME:-$HOME/.cache}"
+    case "$base" in
+        /*) ;;
+        *)  base="$HOME/.cache" ;;
+    esac
+    printf '%s/%s' "$base" "$_SECURITY_CACHE_REL"
+}
+
+# Refresh the cache in the background — never blocks the banner.
+# Writes atomically (temp file + rename) so a half-written file can't
+# be observed by a concurrent reader.
+_security_refresh_async() {
+    local cache_file="$1"
+    local cache_dir
+    cache_dir=$(dirname "$cache_file")
+    mkdir -p "$cache_dir" 2>/dev/null || return 0
+
+    # Detached subshell — survives banner exit. Output redirected to nowhere.
+    (
+        local count=""
+        if command -v apt >/dev/null 2>&1; then
+            count=$(apt list --upgradable 2>/dev/null | grep -ci security)
+        elif command -v dnf >/dev/null 2>&1; then
+            count=$(dnf updateinfo list --security 2>/dev/null | grep -c '^\w')
+        fi
+        if [[ "$count" =~ ^[0-9]+$ ]]; then
+            local tmp
+            tmp=$(mktemp "$cache_dir/.security-updates.XXXXXX" 2>/dev/null) || exit 0
+            printf '%s\n' "$count" > "$tmp"
+            mv -f "$tmp" "$cache_file" 2>/dev/null || rm -f "$tmp"
+        fi
+    ) >/dev/null 2>&1 &
+    disown 2>/dev/null || true
+}
+
+# Read the cached value, trigger an async refresh when stale or missing.
+# Always returns instantly — never blocks the banner.
+_security_updates_count() {
+    local cache_file
+    cache_file=$(_security_cache_path)
+    local now mtime age
+    now=$(date +%s)
+    mtime=0
+    [[ -r "$cache_file" ]] && mtime=$(stat -c '%Y' "$cache_file" 2>/dev/null || echo 0)
+    age=$(( now - mtime ))
+
+    if (( age > _SECURITY_CACHE_TTL )); then
+        _security_refresh_async "$cache_file"
+    fi
+
+    if [[ -r "$cache_file" ]]; then
+        local val
+        IFS= read -r val < "$cache_file" 2>/dev/null
+        val=$(_strip_ctrl "$val")
+        _is_int "$val" && { printf '%s' "$val"; return; }
+    fi
+    printf '%s' "—"
+}
+
+_section_security() {
+    [[ "${SHOW_SECURITY:-1}" == "1" ]] || return 0
+    local items=()
+
+    # 1. Updates count (cached, never blocks)
+    local updates color
+    updates=$(_security_updates_count)
+    if [[ "$updates" == "—" ]]; then
+        items+=("${CYAN}updates: —${RESET}")
+    elif _is_int "$updates"; then
+        color=$GREEN
+        (( updates > 0 )) && color=$YELLOW
+        (( updates > 5 )) && color=$RED
+        items+=("${color}updates: $updates${RESET}")
+    fi
+
+    # 2. Firewall state — no sudo, no false positives.
+    # `--system` is explicit so a user unit with the same name can't shadow
+    # the real firewall service.
+    if command -v systemctl >/dev/null 2>&1; then
+        local fw="firewall: off"
+        local fw_color=$RED
+        if [[ "$(systemctl --system is-active ufw 2>/dev/null)" == "active" ]]; then
+            fw="UFW active"; fw_color=$GREEN
+        elif [[ "$(systemctl --system is-active firewalld 2>/dev/null)" == "active" ]]; then
+            fw="firewalld active"; fw_color=$GREEN
+        elif [[ "$(systemctl --system is-active nftables 2>/dev/null)" == "active" ]]; then
+            fw="nftables active"; fw_color=$GREEN
+        fi
+        items+=("${fw_color}${fw}${RESET}")
+    fi
+
+    # 3. Last login — display only, no comparisons.
+    # `--` separates flags from the username, so a hostile $USER like "-f path"
+    # can't redirect `last` to a different wtmp file (argument injection).
+    if command -v last >/dev/null 2>&1; then
+        # last -F format: "user  tty  Day Mon DD HH:MM:SS YYYY ..."
+        # field positions:  $1   $2   $3  $4   $5    $6   $7
+        # We want Month + Day + Time → fields 4 5 6.
+        # NR==2 skips the current session ("still logged in") and picks the
+        # previous one. If only one entry exists, NR==1 falls through.
+        local raw
+        raw=$(last -n 3 -F -- "$USER" 2>/dev/null \
+              | awk 'NR==2 && $4 != "" {print $4,$5,$6; exit}
+                     END { if (NR<2) print "" }')
+        raw=$(_strip_ctrl "$raw")
+        [[ -n "$raw" ]] && items+=("last: $raw")
+    fi
+
+    [[ ${#items[@]} -eq 0 ]] && return 0
+
+    printf "${CYAN}🔒 Security:${RESET} "
+    local i=0
+    for item in "${items[@]}"; do
+        (( i++ > 0 )) && printf " ${CYAN}·${RESET} "
+        printf '%s' "$item"
+    done
+    printf '\n'
+}
+
+# ════════════════════════════════════════════════════════════
 # Section: footer
 # ════════════════════════════════════════════════════════════
 _section_footer() {
@@ -410,6 +547,7 @@ main() {
     _section_ollama
     _section_load
     _section_memory
+    _section_security
     _section_footer
 }
 

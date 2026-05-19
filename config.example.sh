@@ -12,6 +12,7 @@ SHOW_UPTIME=1
 SHOW_GPU=1
 SHOW_GPU_DETAIL=1     # 1=name+temp+VRAM bar+power, 0=temp only
 SHOW_OLLAMA=1         # auto-hidden if `ollama` isn't installed
+SHOW_SECURITY=1       # security updates (cached) + firewall + last login
 SHOW_LOAD=1
 SHOW_MEMORY=1
 
