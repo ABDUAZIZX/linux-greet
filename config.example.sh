@@ -10,6 +10,8 @@ SHOW_WELCOME=1
 SHOW_DATE=1
 SHOW_UPTIME=1
 SHOW_GPU=1
+SHOW_GPU_DETAIL=1     # 1=name+temp+VRAM bar+power, 0=temp only
+SHOW_OLLAMA=1         # auto-hidden if `ollama` isn't installed
 SHOW_LOAD=1
 SHOW_MEMORY=1
 

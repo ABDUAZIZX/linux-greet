@@ -28,6 +28,8 @@ SHOW_WELCOME=1
 SHOW_DATE=1
 SHOW_UPTIME=1
 SHOW_GPU=1
+SHOW_GPU_DETAIL=1     # 1=name + temp + VRAM bar + power | 0=temp only
+SHOW_OLLAMA=1
 SHOW_LOAD=1
 SHOW_MEMORY=1
 LANG_MODE=both        # ar | en | both
@@ -36,7 +38,7 @@ GREETING_NAME=""      # if empty, falls back to $USER
 
 # Whitelist of config keys (space-separated).
 # Parsing never executes config content — values are matched against this list.
-readonly _ALLOWED_KEYS="SHOW_BANNER SHOW_WELCOME SHOW_DATE SHOW_UPTIME SHOW_GPU SHOW_LOAD SHOW_MEMORY LANG_MODE BANNER_COLOR GREETING_NAME"
+readonly _ALLOWED_KEYS="SHOW_BANNER SHOW_WELCOME SHOW_DATE SHOW_UPTIME SHOW_GPU SHOW_GPU_DETAIL SHOW_OLLAMA SHOW_LOAD SHOW_MEMORY LANG_MODE BANNER_COLOR GREETING_NAME"
 
 # ════════════════════════════════════════════════════════════
 # Safe config loader — KEY=VALUE only, no `source`, whitelisted keys.
@@ -88,9 +90,9 @@ _load_config() {
         [[ " $_ALLOWED_KEYS " == *" $key "* ]] || continue
         [[ "$key" =~ ^[A-Z_][A-Z0-9_]*$ ]] || continue
 
-        # Strip ANSI escapes from values so a tampered config can't move the
-        # cursor or recolour the terminal — see CWE-150.
-        val="${val//$'\033'/}"
+        # Strip ALL control chars so a tampered config can't move the cursor,
+        # recolour the terminal, or overwrite earlier output — see CWE-150.
+        val=$(_strip_ctrl "$val")
 
         declare -g "$key=$val"
     done
@@ -107,9 +109,9 @@ _detect_distro() {
     while IFS='=' read -r key val; do
         [[ "$key" == "PRETTY_NAME" || "$key" == "NAME" ]] || continue
         val="${val%\"}"; val="${val#\"}"
-        # Strip ANSI escape sequences — defends against a tampered os-release
-        # that could inject cursor moves / colour codes into our banner (CWE-150).
-        val="${val//$'\033'/}"
+        # Strip ALL control chars — defends against a tampered os-release
+        # injecting cursor moves / colour codes / line overwrites (CWE-150).
+        val=$(_strip_ctrl "$val")
         if [[ "$key" == "PRETTY_NAME" && -n "$val" ]]; then
             DISTRO_NAME="$val"
             return
@@ -205,10 +207,99 @@ _section_uptime() {
 }
 
 # ════════════════════════════════════════════════════════════
-# Section: GPU temperature (NVIDIA / AMD / lm-sensors fallback)
+# Helpers: numeric validation + ASCII progress bar + ctrl-char strip
+# ════════════════════════════════════════════════════════════
+_is_int() { [[ "$1" =~ ^[0-9]+$ ]]; }
+
+# Strip ALL control characters except tab — defends against terminal-escape
+# injection from any external command's output (CWE-150 / CWE-93).
+# Covers: \r, \b, \x07 (BEL), \x1b (ESC), \x7f (DEL), \x9b (CSI 8-bit).
+_strip_ctrl() {
+    local s="${1-}"
+    printf '%s' "${s//[$'\001'-$'\010'$'\013'-$'\037'$'\177']/}"
+}
+
+# _progress_bar <used> <total> [width]   →   prints e.g. ████░░░░ 52%
+# Width defaults to 10. Caller is responsible for color codes around it.
+_progress_bar() {
+    local used="${1:-0}" total="${2:-1}" width="${3:-10}"
+    _is_int "$used" && _is_int "$total" && (( total > 0 )) || { printf '?'; return; }
+    (( used > total )) && used="$total"
+    local pct=$(( used * 100 / total ))
+    local filled=$(( used * width / total ))
+    local empty=$(( width - filled ))
+    local bar=""
+    while (( filled-- > 0 )); do bar+="█"; done
+    while (( empty-- > 0 ));  do bar+="░"; done
+    printf '%s %d%%' "$bar" "$pct"
+}
+
+# _temp_color <celsius>  →  prints the color escape (green/yellow/red)
+_temp_color() {
+    local t="$1"
+    _is_int "$t" || { printf '%s' "$CYAN"; return; }
+    if   (( t >= 75 )); then printf '%s' "$RED"
+    elif (( t >= 60 )); then printf '%s' "$YELLOW"
+    else                     printf '%s' "$GREEN"
+    fi
+}
+
+# ════════════════════════════════════════════════════════════
+# Section: GPU — detailed (NVIDIA single-call) or basic (temp only)
 # ════════════════════════════════════════════════════════════
 _section_gpu() {
     [[ "${SHOW_GPU:-1}" == "1" ]] || return 0
+
+    if [[ "${SHOW_GPU_DETAIL:-1}" == "1" ]] && command -v nvidia-smi >/dev/null 2>&1; then
+        _section_gpu_nvidia_detail && return
+    fi
+
+    # Fallback: simple temperature line (NVIDIA / AMD / lm-sensors)
+    _section_gpu_simple
+}
+
+# Detailed NVIDIA line — one nvidia-smi call, all fields.
+_section_gpu_nvidia_detail() {
+    local raw
+    raw=$(nvidia-smi --query-gpu=name,temperature.gpu,memory.used,memory.total,power.draw \
+          --format=csv,noheader,nounits 2>/dev/null) || return 1
+    [[ -z "$raw" ]] && return 1
+
+    # Parse the first GPU line — fields are comma+space separated.
+    local name temp mem_used mem_total power
+    IFS=',' read -r name temp mem_used mem_total power <<<"$raw"
+
+    # Trim whitespace and strip the verbose vendor prefix.
+    name="${name#"${name%%[![:space:]]*}"}"; name="${name%"${name##*[![:space:]]}"}"
+    name="${name#NVIDIA GeForce }"
+    name=$(_strip_ctrl "$name")
+    temp="${temp// /}"
+    mem_used="${mem_used// /}"
+    mem_total="${mem_total// /}"
+    power="${power// /}"
+    power=$(_strip_ctrl "$power")
+
+    _is_int "$temp" || return 1
+    _is_int "$mem_used" || return 1
+    _is_int "$mem_total" || return 1
+
+    local color bar
+    color=$(_temp_color "$temp")
+    bar=$(_progress_bar "$mem_used" "$mem_total" 8)
+
+    # Format: 🎮 NVIDIA <name> | <temp>°C | <used>/<total>MiB <bar> <pct>% | <power>W
+    if [[ -n "$power" && "$power" != "[" && "$power" != "[Not" ]]; then
+        printf "${CYAN}🎮 NVIDIA %s${RESET} ${CYAN}|${RESET} ${color}%s°C${RESET} ${CYAN}|${RESET} %s/%sMiB %s ${CYAN}|${RESET} %sW\n" \
+            "$name" "$temp" "$mem_used" "$mem_total" "$bar" "$power"
+    else
+        printf "${CYAN}🎮 NVIDIA %s${RESET} ${CYAN}|${RESET} ${color}%s°C${RESET} ${CYAN}|${RESET} %s/%sMiB %s\n" \
+            "$name" "$temp" "$mem_used" "$mem_total" "$bar"
+    fi
+    return 0
+}
+
+# Simple temperature line — NVIDIA / AMD / lm-sensors fallback.
+_section_gpu_simple() {
     local gpu_temp="" gpu_label="GPU"
 
     if command -v nvidia-smi >/dev/null 2>&1; then
@@ -227,18 +318,53 @@ _section_gpu() {
         return
     fi
 
-    # Numeric validation before arithmetic comparison.
-    if [[ ! "$gpu_temp" =~ ^[0-9]+$ ]]; then
+    if ! _is_int "$gpu_temp"; then
         printf "${CYAN}🌡  %s Temp:${RESET} ${RED}invalid${RESET}\n" "$gpu_label"
         return
     fi
 
     local color
-    if   (( gpu_temp >= 75 )); then color=$RED
-    elif (( gpu_temp >= 60 )); then color=$YELLOW
-    else                            color=$GREEN
-    fi
+    color=$(_temp_color "$gpu_temp")
     printf "${CYAN}🌡  %s Temp:${RESET} ${color}%s°C${RESET}\n" "$gpu_label" "$gpu_temp"
+}
+
+# ════════════════════════════════════════════════════════════
+# Section: Ollama — model count + currently loaded model
+# Quiet when ollama isn't installed.
+# ════════════════════════════════════════════════════════════
+_section_ollama() {
+    [[ "${SHOW_OLLAMA:-1}" == "1" ]] || return 0
+    command -v ollama >/dev/null 2>&1 || return 0
+
+    # Count of installed models (subtract the header line).
+    local list_out total
+    list_out=$(ollama list 2>/dev/null) || return 0
+    total=$(printf '%s\n' "$list_out" | tail -n +2 | grep -c '^[^[:space:]]')
+
+    # Currently loaded model + size + processor (ollama ps).
+    local ps_out
+    ps_out=$(ollama ps 2>/dev/null | tail -n +2 | head -1)
+
+    if [[ -z "$ps_out" ]]; then
+        printf "${CYAN}🤖 Ollama:${RESET} %s models ${CYAN}·${RESET} idle\n" "$total"
+        return
+    fi
+
+    # Fields: NAME ID SIZE_VAL SIZE_UNIT PROCESSOR_PCT PROCESSOR_KIND ...
+    local name id size_val size_unit processor_pct processor_kind
+    read -r name id size_val size_unit processor_pct processor_kind _ <<<"$ps_out"
+
+    # Shorten verbose HuggingFace names:
+    #   hf.co/org/Foundation-Sec-8B-Reasoning-Q4_K_M-GGUF:latest
+    #     → Foundation-Sec-8B-Reasoning
+    local short_name="${name##*/}"          # last path segment
+    short_name="${short_name%%-Q[0-9]*}"    # strip -Q4..., -Q5..., -Q8... + rest
+    short_name="${short_name%-GGUF*}"       # strip -GGUF and trailing :tag
+    short_name="${short_name%:latest}"      # noise tag
+    short_name=$(_strip_ctrl "$short_name")
+
+    printf "${CYAN}🤖 Ollama:${RESET} %s models ${CYAN}·${RESET} %s loaded (%s%s, %s)\n" \
+        "$total" "$short_name" "$size_val" "$size_unit" "$processor_kind"
 }
 
 # ════════════════════════════════════════════════════════════
@@ -281,6 +407,7 @@ main() {
     _section_date
     _section_uptime
     _section_gpu
+    _section_ollama
     _section_load
     _section_memory
     _section_footer
