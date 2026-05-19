@@ -1,9 +1,7 @@
 # linux-greet
 
 > A friendly bilingual (Arabic / English) terminal banner for Linux.
-> Shows distro name, localised date, uptime, GPU temperature, load, memory — every time you open a terminal.
-
-![demo](./demo.png) <!-- اختياري: التقط لقطة وأضفها هنا -->
+> Shows distro · date · uptime · GPU dashboard · Ollama · load · memory · security — every time you open a terminal. No sudo required.
 
 ```
 ╔══════════════════════════════════════════════════════════════╗
@@ -14,24 +12,31 @@
 ║  ██████╔╝███████╗██████╔╝██║██║  ██║██║ ╚████║   ██║██████╔╝ ║
 ║  ╚═════╝ ╚══════╝╚═════╝ ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝   ╚═╝╚═════╝  ║
 ╚══════════════════════════════════════════════════════════════╝
-👋 Welcome, abduaiz  (Debian GNU/Linux 13 (trixie))
-📅 الإثنين 18 مايو 2026  ·  Monday, May 18, 2026
-⏱  Uptime: up 16 hours, 30 minutes
-🌡  NVIDIA Temp: 41°C
-⚙️  Load avg: 0.42 0.55 0.61
-🧠 Memory:   6.4G / 67G
+👋 Welcome, alice  (Debian GNU/Linux 13 (trixie))
+📅 الثلاثاء 19 مايو 2026  ·  Tuesday, May 19, 2026
+⏱  Uptime: up 1 day, 5 hours, 32 minutes
+🎮 NVIDIA RTX 2060 SUPER | 44°C | 5772/8192MiB █████░░░ 70% | 4.49W
+🤖 Ollama: 9 models · **** loaded (5.2GB, GPU)
+⚙️  Load avg: 0.56 0.58 0.55
+🧠 Memory:   8.7G / 67G
+🔒 Security: updates: 0 · UFW active · last: May 17 22:24:35
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
 ## ✨ Features
 
-- **Distro auto-detect** from `/etc/os-release` (works on Debian, Ubuntu, Fedora, Arch, ...)
-- **Date in Arabic** with English fallback when `ar_SA.UTF-8` locale isn't installed
-- **GPU temperature** for NVIDIA (`nvidia-smi`), AMD (`rocm-smi`), or generic (`lm-sensors`)
-- **Color-coded GPU temp**: green < 60°C, yellow 60-74°C, red ≥ 75°C
-- **Load average** and **memory usage** from `/proc` and `free`
-- **No external deps required** — pure bash + standard core utils
-- **Idempotent**: shows once per shell session (with the optional zshrc hook)
+- **Distro auto-detect** from `/etc/os-release` (Debian, Ubuntu, Fedora, Arch, ...).
+- **Bilingual date** — Arabic + English, with English fallback when `ar_SA.UTF-8` locale isn't installed.
+- **NVIDIA GPU dashboard** — name, temperature, VRAM usage with progress bar, power draw — all from a single `nvidia-smi` call.
+- **AMD / lm-sensors fallback** if NVIDIA isn't present.
+- **Ollama integration** — installed model count and the model currently loaded into VRAM (auto-hidden when ollama isn't installed).
+- **Security panel** — pending security updates, firewall state (UFW/firewalld/nftables), last login — all **without sudo**.
+- **Color-coded temperatures**: green < 60°C, yellow 60-74°C, red ≥ 75°C.
+- **Modular sections** — every section can be toggled via `~/.config/linux-greet/config.sh`.
+- **Safe config parser** — whitelist + regex, never `source`s your config, owner-checked via file descriptor (defends CWE-362 TOCTOU).
+- **Async background refresh** for the slow `apt list` query — the banner never blocks.
+- **No external deps required** — pure bash + standard core utils.
+- **Idempotent shell hook** — shows once per session, never duplicates.
 
 ## 📦 Installation
 
