@@ -425,12 +425,27 @@ _security_refresh_async() {
     mkdir -p "$cache_dir" 2>/dev/null || return 0
 
     # Detached subshell — survives banner exit. Output redirected to nowhere.
+    #
+    # Distro auto-detection via `command -v` — no /etc/os-release parsing
+    # needed; whichever package manager exists wins. Currently supports
+    # Debian/Ubuntu/Kali/Mint (apt), Fedora/RHEL/Rocky/Alma (dnf), and
+    # openSUSE/SLE (zypper). Arch has no upstream security flag.
     (
         local count=""
         if command -v apt >/dev/null 2>&1; then
-            count=$(apt list --upgradable 2>/dev/null | grep -ci security)
+            # Match only packages from a *-security pocket (bookworm-security,
+            # trixie-security, jammy-security, …). Avoids false positives like
+            # "libsecurity-foo" that just happen to contain the word.
+            count=$(apt list --upgradable 2>/dev/null | grep -c '/[^ ]*-security')
         elif command -v dnf >/dev/null 2>&1; then
-            count=$(dnf updateinfo list --security 2>/dev/null | grep -c '^\w')
+            # Match advisory IDs only (FEDORA-2026-…, RHSA-…, ALAS-…).
+            # Skips dnf's header lines which also start with word chars.
+            count=$(dnf updateinfo list --security 2>/dev/null | grep -cE '^[A-Z]+-[0-9]')
+        elif command -v zypper >/dev/null 2>&1; then
+            # openSUSE: list-patches outputs a pipe-table; data rows start
+            # with "| " after the header. --non-interactive avoids prompts.
+            count=$(zypper --non-interactive list-patches --category security 2>/dev/null \
+                    | awk -F'|' 'NR>3 && NF>=5 {c++} END {print c+0}')
         fi
         if [[ "$count" =~ ^[0-9]+$ ]]; then
             local tmp
