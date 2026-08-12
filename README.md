@@ -41,7 +41,7 @@
 
 ```bash
 # 1. Clone or download
-git clone https://github.com/azoz8/linux-greet.git
+git clone https://github.com/ABDUAZIZX/linux-greet.git
 cd linux-greet
 
 # 2. Make executable
@@ -147,7 +147,7 @@ PRs welcome for:
 ## 📦 التثبيت السريع
 
 ```bash
-git clone https://github.com/azoz8/linux-greet.git ~/linux-greet
+git clone https://github.com/ABDUAZIZX/linux-greet.git ~/linux-greet
 chmod +x ~/linux-greet/linux-greet.sh
 
 # نسخ ملف الإعدادات

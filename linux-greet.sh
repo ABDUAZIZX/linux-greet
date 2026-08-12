@@ -4,7 +4,7 @@
 # Tested on Debian 13; works on any Linux with bash >= 4.0.
 #
 # License: MIT
-# Source : https://github.com/azoz8/linux-greet
+# Source : https://github.com/ABDUAZIZX/linux-greet
 #
 # Configuration: ~/.config/linux-greet/config.sh  (see config.example.sh)
 
